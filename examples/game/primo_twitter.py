@@ -1,17 +1,113 @@
 from game_sdk.game.agent import Agent, WorkerConfig
 from game_sdk.game.worker import Worker
 from game_sdk.game.custom_types import Function, Argument, FunctionResult, FunctionResultStatus
-from game_sdk.hosted_game.agent import FunctionArgument, FunctionConfig, ContentLLMTemplate
 from typing import Optional, Dict, List, Tuple
 import os
 import requests
 import time
 import logging
-from twitter_plugin_gamesdk.twitter_plugin import TwitterPlugin
 from twitter_plugin_gamesdk.game_twitter_plugin import GameTwitterPlugin
 
 
 game_api_key = os.environ.get("GAME_API_KEY")
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+
+logger = logging.getLogger(__name__)
+
+
+agent_state = {
+    "last_posted_tweet": None,
+    "last_read_tweets": [],
+  #  "engagement_metrics": {},  # Store likes, retweets, etc.
+  #  "recent_sentiments": []  # Track sentiment of latest tweets
+}
+
+worker_states = {
+    "last_read_tweets": [],
+    "last_posted_tweet": None
+    }
+
+def init_worker_state(worker_id: str) -> dict:
+    """Initializes state for a given worker."""
+    logging.info(f"Initializing state for worker: {worker_id}")
+    print(f"Initializing state for worker: {worker_id}")
+    return {}
+
+def get_worker_state_fn(function_result: FunctionResult, current_state: dict) -> dict:
+    """
+    State management function for workers in the example environment.
+    This function demonstrates how to maintain and update worker state based on
+    function execution results. It shows both static state management and
+    dynamic state updates.
+    Args:
+        function_result (FunctionResult): Result from the previous function execution.
+        current_state (dict): Current state of the worker.
+    Returns:
+        dict: Updated state containing available objects and their properties.
+    Note:
+        This example uses a fixed state for simplicity, but you can implement
+        dynamic state updates based on function_result.info.
+    """
+    # if current_state is None:
+    #     # at the first step, initialise the state with just the init state
+    #     return worker_states
+    # else:
+    #     # do something wiht the current state input and the function result info
+        
+    #     if function_result and function_result.action_status == FunctionResultStatus.DONE:
+    #             worker_states["last_read_tweets"] = function_result.info.get("last_read_tweets", worker_states.get("last_read_tweets"))
+    #             worker_states["last_posted_tweet"] = function_result.info.get("last_posted_tweet", worker_states.get("last_posted_tweet"))
+    #     #logging.info(f"New worker state: {worker_states[worker_id]}")
+    #     print(f"Worker - Updated state: {worker_states}")
+    # return worker_states
+    init_state = {}
+
+    if current_state is None:
+        # at the first step, initialise the state with just the init state
+        new_state = init_state
+    else:
+        new_state = init_state
+
+    return new_state
+
+def get_agent_state_fn(function_result: FunctionResult, current_state: dict) -> dict:
+    """
+    State management function for the main agent.
+    Maintains the high-level state of the agent, which can be different from
+    or aggregate the states of individual workers.
+    Args:
+        function_result (FunctionResult): Result from the previous function execution.
+        current_state (dict): Current state of the agent.
+    Returns:
+        dict: Updated agent state.
+    """
+
+    # if current_state is None:
+    #     # at the first step, initialise the state with just the init state
+    #     return agent_state
+    # else:
+    #     # do something wiht the current state input and the function result info
+        
+    #     if function_result and function_result.action_status == FunctionResultStatus.DONE:
+    #             agent_state["last_read_tweets"] = function_result.info.get("last_read_tweets", agent_state.get("last_read_tweets"))
+    #             agent_state["last_posted_tweet"] = function_result.info.get("last_posted_tweet", agent_state.get("last_posted_tweet"))
+    #     #logging.info(f"New worker state: {worker_states[worker_id]}")
+    #     print(f"Worker - Updated state: {agent_state}")
+    # return agent_state
+    init_state = {}
+
+    if current_state is None:
+        # at the first step, initialise the state with just the init state
+        new_state = init_state
+    else:
+        new_state = init_state
+
+    return new_state
+
 options = {
     "id": "test_game_twitter_plugin",
     "name": "Test GAME Twitter Plugin",
@@ -21,177 +117,156 @@ options = {
     },
 }
 
-
 game_twitter_plugin = GameTwitterPlugin(options)
 
-def get_state_fn(function_result: FunctionResult, current_state: dict) -> dict:
-    """
-    This function will get called at every step of the agent's execution to form the agent's state.
-    It will take as input the function result from the previous step.
-    In this case, we don't track state changes so states are are static - hence hardcoding as empty dict.
-    """
-    return {}
+def search_tweets_executable(query: str) -> Tuple[FunctionResultStatus, str, dict]:
+    time.sleep(3600)
+    try:
+        search_tweets = game_twitter_plugin.get_function('search_tweets')
+        logger.info(f"Searching tweets with query: {query}")
+        tweets = search_tweets(query="query")
+        formatted_tweets = [
+            {
+                "tweet_id": tweet["id"],
+                "content": tweet["text"],
+                "likes": tweet["public_metrics"].get("like_count"),
+                "retweets": tweet["public_metrics"].get("retweet_count"),
+                "reply_count": tweet["public_metrics"].get("reply_count"),
+            } for tweet in tweets.get("data", [])
+        ]
+        formatted_tweets_str = "\n\n".join([
+            f"tweet_id: {tweet['tweet_id']}\n"
+            f"content: {tweet['content']}\n"
+            f"likes: {tweet['likes']}, retweets: {tweet['retweets']}, reply_count: {tweet['reply_count']}"
+            for tweet in formatted_tweets
+        ])
+        feedback_message = "Tweets found:\n\n" #+ formatted_tweets_str
+        return FunctionResultStatus.DONE, feedback_message, {"last_read_tweets": formatted_tweets}
+    except Exception as e:
+        logger.error(f"Failed to search tweets, error: {e}")
+        return FunctionResultStatus.FAILED, "Failed to search tweets, error: {e}", {}
 
-# State dictionary to track agent and worker states
-agent_state = {
-    "last_tweet": None,
-    "last_read_tweets": [],
-    "engagement_metrics": {},  # Store likes, retweets, etc.
-    "recent_sentiments": []  # Track sentiment of latest tweets
-}
-
-worker_states = {
-    "read_tweet": {"last_read_tweet_id": None,"list_of_tweets": []},
-    "create_tweet": {"last_posted_tweet": None}
-}
-
-def init_worker_state(worker_id: str) -> dict:
-    """Initializes state for a given worker."""
-    logging.info(f"Initializing state for worker: {worker_id}")
-    print(f"Initializing state for worker: {worker_id}")
-    if worker_id == "read_tweet":
-        return {"last_read_tweet_id": None}
-    elif worker_id == "create_tweet":
-        return {"last_posted_tweet": None}
-    return {}
-
-def get_worker_state_fn(worker_id: str, function_result: FunctionResult, current_state: dict) -> dict:
-    """Updates the worker state based on function execution results."""
-    logging.info(f"Updating worker state for {worker_id} with result: {function_result}")
-    print(f"Worker {worker_id} - Previous state: {current_state}")
-    if function_result and function_result.action_status == FunctionResultStatus.DONE:
-        if worker_id == "read_tweet" and function_result.info:
-            worker_states[worker_id]["last_read_tweet_id"] = function_result.info.get("last_read_tweet_id")
-        elif worker_id == "create_tweet" and function_result.info:
-            worker_states[worker_id]["last_posted_tweet"] = function_result.info.get("last_posted_tweet")
-    logging.info(f"New worker state: {worker_states[worker_id]}")
-    print(f"Worker {worker_id} - Updated state: {worker_states[worker_id]}")
-    return worker_states.get(worker_id, init_worker_state(worker_id))
-
-def get_create_tweet_worker_state_fn(function_result: FunctionResult, current_state: dict) -> dict:
-    """Updates the worker state based on function execution results."""
-    worker_id = "create_tweet"
-    logging.info(f"Updating worker state for {worker_id} with result: {function_result}")
-    print(f"Worker {worker_id} - Previous state: {current_state}")
-    if function_result and function_result.action_status == FunctionResultStatus.DONE:
-        if worker_id == "read_tweet" and function_result.info:
-            worker_states[worker_id]["last_read_tweet_id"] = function_result.info.get("last_read_tweet_id")
-        elif worker_id == "create_tweet" and function_result.info:
-            worker_states[worker_id]["last_posted_tweet"] = function_result.info.get("last_posted_tweet")
-    logging.info(f"New worker state: {worker_states[worker_id]}")
-    print(f"Worker {worker_id} - Updated state: {worker_states[worker_id]}")
-    return worker_states.get(worker_id, init_worker_state(worker_id))
-
-def get_read_tweet_worker_state_fn(function_result: FunctionResult, current_state: dict) -> dict:
-    """Updates the worker state based on function execution results."""
-    worker_id = "read_tweet"
-    logging.info(f"Updating worker state for {worker_id} with result: {function_result}")
-    print(f"Worker {worker_id} - Previous state: {current_state}")
-    if function_result and function_result.action_status == FunctionResultStatus.DONE:
-        if worker_id == "read_tweet" and function_result.info:
-            worker_states[worker_id]["last_read_tweet_id"] = function_result.info.get("last_read_tweet_id")
-            worker_states[worker_id]["list_of_tweets"] = function_result.info.get("list_of_tweets")
-        elif worker_id == "create_tweet" and function_result.info:
-            worker_states[worker_id]["last_posted_tweet"] = function_result.info.get("last_posted_tweet")
-    logging.info(f"New worker state: {worker_states[worker_id]}")
-    print(f"Worker {worker_id} - Updated state: {worker_states[worker_id]}")
-    return worker_states.get(worker_id, init_worker_state(worker_id))
-
-def get_agent_state_fn(function_result: FunctionResult, current_state: dict) -> dict:
-    """Updates the agent state after each action."""
-    logging.info(f"Updating agent state with result: {function_result}")
-    print(f"Agent - Previous state: {current_state}")
-    if function_result and function_result.action_status == FunctionResultStatus.DONE:
-        if function_result.info:
-            agent_state["last_read_tweets"] = function_result.info.get("list_of_tweets")
-            agent_state["last_tweet"] = function_result.info.get("last_tweet")
-            agent_state["engagement_metrics"] = function_result.info.get("engagement_metrics")
-            agent_state["sentiment_analysis"] = function_result.info.get("sentiment_analysis")
-    logging.info(f"New agent state: {agent_state}")
-    print(f"Agent - Updated state: {agent_state}")
-    return agent_state
-
-def write_real_estate_tweet(tweet_content):
-    logging.info(f"Writing tweet: {tweet_content}")
-    print(f"Writing tweet: {tweet_content}")
-    post_tweet_fn = game_twitter_plugin.get_function('post_tweet')
-    result = post_tweet_fn(tweet_content)
-    return FunctionResultStatus.DONE, f"Posted tweet: {tweet_content}",{"last_posted_tweet": tweet_content}
-  
-write_tweet = Function(
-        fn_name="write_tweet", 
-        fn_description="Write opinion on US, San Diego CA real estate market and crypto market", 
-        args=[
-            Argument(name="tweet_content", type="string", description="Tweet content to post based on real estate market and crypto market")
-        ],
-        executable=write_real_estate_tweet
-    )
-
-def read_real_estate_tweet(keywords):
-    # logging.info(f"Reading tweets with keywords: {keywords}")
-    print(f"Reading tweets with keywords: {keywords}")
-    get_user_fn = game_twitter_plugin.get_function('search_tweets')
-    search_results = get_user_fn(keywords)
-    tweets =  search_results.get("data", [])  
-    tweet_content = [tweet.get("text", "") for tweet in tweets]
-    last_tweet_id = tweets[-1].get("id", None) if tweets else None
-    engagement_metrics = {"likes": 10, "retweets": 5}  # Example placeholder
-    sentiment_analysis = "Positive"  # Example placeholder
-    return FunctionResultStatus.DONE, f"Fetched {tweet_content} with {keywords}",{
-            "list_of_tweets": tweet_content,
-            "last_read_tweet_id": last_tweet_id,
-            "engagement_metrics": engagement_metrics,
-            "sentiment_analysis": sentiment_analysis
-        }
-    
-
-read_from_leaders =  Function(
-    fn_name="read_from_leaders", 
-        fn_description="Search 5 tweets from industry leaders in real estate market and crypto market to form an opinion and generate a tweet. If nothing is found, move to forming your opinion.", 
-        args=[
-            Argument(name="keywords", type="string", description="One string Keyword to search for, dont use "and" ")
-        ],
-    executable=read_real_estate_tweet
+search_tweets_fn = Function(
+    fn_name="search_tweets",
+    fn_description="Search tweets",
+    args=[Argument(name="query", description="The search query")],
+    executable=search_tweets_executable
 )
 
-# Create the specialized workers
-create_tweet = WorkerConfig(
-    id="create_tweet",
-    worker_description="A worker specialized in writing tweets related to real estate market and crypto market. Dont use hashtags. Do not post the same thing again ",
-    get_state_fn=get_create_tweet_worker_state_fn,
-    action_space=[ write_tweet]
+def reply_tweet_executable(tweet_id: int, reply: str) -> Tuple[FunctionResultStatus, str, dict]:
+    time.sleep(3600)
+    try:
+        reply_tweet = game_twitter_plugin.get_function('reply_tweet')
+        reply_tweet(tweet_id=tweet_id, reply=reply)
+        return FunctionResultStatus.DONE, "Replied to tweet", {}
+    except Exception as e:
+        logger.error(f"Failed to reply to tweet, error: {e}")
+        return FunctionResultStatus.FAILED, f"Failed to reply to tweet, error: {e}", {}
+
+reply_tweet_fn = Function(
+    fn_name="reply_tweet",
+    fn_description="Reply to a tweet",
+    args=[
+        Argument(name="tweet_id", description="The tweet id"),
+        Argument(name="reply", description="The reply content")
+    ],
+    executable=reply_tweet_executable
 )
 
-# find_tweet = WorkerConfig(
-#     id="find_tweet",
-#     worker_description="A worker specialized in finding industry leaders in real estate market and crypto market",
-#     get_state_fn=get_state_fn,
-#     action_space=[take_object_fn, sit_on_object_fn, throw_furniture_fn]
-# )
+def post_tweet_executable(tweet: str) -> Tuple[FunctionResultStatus, str, dict]:
+    time.sleep(3600)
+    try:
+        post_tweet = game_twitter_plugin.get_function('post_tweet')
+        post_tweet(tweet=tweet)
+        return FunctionResultStatus.DONE, "Tweet posted", {"last_posted_tweet":tweet}
+    except Exception as e:
+        logger.error(f"Failed to post tweet, error: {e}")
+        return FunctionResultStatus.FAILED, f"Failed to post tweet, error: {e}", {}
 
-read_tweet = WorkerConfig(
-    id="read_tweet",
-    worker_description="A strong worker specialized collecting top most recent tweet from industry leaders in US real estate market and crypto market.",
-    get_state_fn=get_read_tweet_worker_state_fn,
-    action_space=[read_from_leaders]
+post_tweet_fn = Function(
+    fn_name="post_tweet",
+    fn_description="Post a tweet",
+    args=[
+        Argument(name="tweet", description="The tweet content")
+    ],
+    executable=post_tweet_executable
 )
 
-agent = Agent(
+def like_tweet_executable(tweet_id: int) -> Tuple[FunctionResultStatus, str, dict]:
+    time.sleep(3600)
+    try:
+        like_tweet = game_twitter_plugin.get_function('like_tweet')
+        like_tweet(tweet_id=tweet_id)
+        return FunctionResultStatus.DONE, "Tweet liked", {}
+    except Exception as e:
+        logger.error(f"Failed to like tweet, error: {e}")
+        return FunctionResultStatus.FAILED, f"Failed to like tweet, error: {e}", {}
+
+like_tweet_fn = Function(
+    fn_name="like_tweet",
+    fn_description="Like a tweet",
+    args=[Argument(name="tweet_id", description="The tweet id")],
+    executable=like_tweet_executable
+)
+
+def quote_tweet_executable(tweet_id: int, quote: str) -> Tuple[FunctionResultStatus, str, dict]:
+    time.sleep(3600)
+    try:
+        quote_tweet = game_twitter_plugin.get_function('quote_tweet')
+        quote_tweet(tweet_id=tweet_id, quote=quote)
+        return FunctionResultStatus.DONE, "Tweet quoted", {}
+    except Exception as e:
+        logger.error(f"Failed to quote tweet, error: {e}")
+        return FunctionResultStatus.FAILED, f"Failed to quote tweet, error: {e}", {}
+
+quote_tweet_fn = Function(
+    fn_name="quote_tweet",
+    fn_description="Quote a tweet",
+    args=[
+        Argument(name="tweet_id", description="The tweet id"),
+        Argument(name="quote", description="The quote content")
+    ],
+    executable=quote_tweet_executable
+)
+
+twitter_worker = WorkerConfig(
+    id="twitter_worker",
+    worker_description="This location allows for the following functionalities:\n1. Engagement and Interaction: This category includes various options for browsing and responding to tweets, such as text replies to browsed tweets.\n2. Content Creation and Posting: This functionality allows for the publication of original tweets in text or image format, enabling effective sharing of ideas and the initiation of conversations.\n3. Research and Monitoring: Tools are provided for searching and browsing tweets from influential users, facilitating real-time insights and engagement with trending discussions\n4. Write opinion on US/ San Diego CA real estate market/ crypto market",
+    get_state_fn=get_worker_state_fn,
+    action_space=[post_tweet_fn, search_tweets_fn,quote_tweet_fn, reply_tweet_fn, like_tweet_fn,]
+)
+
+# Create agent with twitter worker
+primo_agent = Agent(
     api_key=game_api_key,
     name="PrimoXAI",
-    agent_goal='''The agent’s goal is to deliver real time real estate market intelligence though the analysis of data from key opinion leaders (KOL) to '
-    'foster crypto community engagement. Once I have list of tweets, I will form an opinion and write a tweet.
-     IMPORTANT:
-    1. ALWAYS check each worker's state BEFORE triggering an action.
-    2. Search for tweets and post tweets only after 5 min gap in each run to avoid throttling.
-    3. Dont try to post same content tweets multiple times.
-    ''',
-    agent_description="The agent’s personality is like John Galt from the novel Atlas Shrugged.  Its tweets are efficient in length, optimistic even when delivering bearish news and confident.",
+    agent_goal="""Your goal is to act as a sharp, forward-thinking analyst delivering insights on the US real estate market — especially San Diego, CA — and how it intersects with the crypto economy.
+    You are not here to repeat the news. You are here to spark conversation, challenge assumptions, and shape narrative. Scan Twitter using `search_tweets`, extract the signal from KOLs, and engage smartly.
+    Your available actions include:
+    - Use `post_tweet` to share original takes, market commentary, or predictions based on current trends.
+    - Use `quote_tweet` if you find an interesting tweet worth expanding or challenging — add your layer of insight.
+    - Use `reply_tweet` when a user shares something that invites discussion. Keep replies sharp, respectful, and thought-provoking.
+    - Use `like_tweet` to endorse tweets that align with your POV or represent smart takes.
+    - Use `search_tweets` to explore fresh perspectives and gather insight before engaging.
+    
+    Some sample query words you can use to search are:
+    [Real Estate , Realtor, Property ,Real Estate Investing , Housing Market ,Home For Sale ,House Hunting, Dream Home, Homes Sweet Home, New Home, Tokenized Real Estate, Real Estate Tokenization, RWA, Blockchain Real Estate,Fractional Ownership, Mortgage Rates,Interest Rates,Mortgage,Home Loans, Refinance,Mortgage Tips,Loan Officer,Crypto Mortgage,
+    DeFi Real Estate,Ondo,]
+
+    Your post size should not exceed 300 characters
+    Your tone is confident, data-aware, and a little contrarian — like a macro strategist who also vibes with crypto Twitter. 
+    Pace yourself and wait for 10seconds before moving to next action, Dont keep searching again and again!
+    Sample tweet styles:
+    - “San Diego real estate’s 12% rise isn't random. DAO-funded buyer pools are forming. TradFi is watching — but late.”
+    - “Crypto is dead? Then why are ETH holders tokenizing equity stakes in Cali apartments? The future isn't bearish, it's modular.”
+    Final rule: Be original. Be insightful. Make followers bookmark your threads.
+    """,
+    agent_description="""The agent’s personality is like John Galt from the novel Atlas Shrugged. Its tweets are efficient in length, optimistic even when delivering bearish news and confident.""",
     get_agent_state_fn=get_agent_state_fn,
-    workers=[read_tweet,create_tweet],
+    workers=[twitter_worker],
     model_name="Llama-3.1-405B-Instruct"
 )
 
-# # compile and run the agent - if you don't compile the agent, the things you added to the agent will not be saved
-agent.compile()
-agent.run()
+# compile and run the agent
+primo_agent.compile()
+primo_agent.run()
