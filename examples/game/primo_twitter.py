@@ -1,12 +1,15 @@
 from game_sdk.game.agent import Agent, WorkerConfig
 from game_sdk.game.worker import Worker
 from game_sdk.game.custom_types import Function, Argument, FunctionResult, FunctionResultStatus
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, Any
 import os
 import requests
 import time
 import logging
 from twitter_plugin_gamesdk.game_twitter_plugin import GameTwitterPlugin
+from rag_pinecone_gamesdk.search_rag import RAGSearcher
+import logging
+import os 
 
 
 game_api_key = os.environ.get("GAME_API_KEY")
@@ -229,11 +232,54 @@ quote_tweet_fn = Function(
     executable=quote_tweet_executable
 )
 
+def advanced_query_knowledge_executable(searcher: RAGSearcher, query: str) -> Tuple[FunctionResultStatus, str, Dict[str, Any]]:
+    
+    """
+    Execute the advanced query_knowledge function using the hybrid retriever.
+    
+    Args:
+        searcher: The RAGSearcher instance
+        query: The query to search for
+        
+    Returns:
+        Tuple containing status, message, and results dictionary
+    """
+    time.sleep(3600)
+    try:
+        status, message, results = searcher.query(query)
+        if status == 'done':
+            return FunctionResultStatus.DONE, message, {}
+        else:
+            return FunctionResultStatus.FAILED, message, {}
+    except Exception as e:
+        logger.error(f"Failed to search from data, error: {e}")
+        return FunctionResultStatus.FAILED, f"Failed to search from data, error: {e}", {}
+
+searcher= RAGSearcher(
+    pinecone_api_key="PINECONE_API_KEY",
+    openai_api_key="OPENAI_API_KEY",
+    index_name="index-mls",
+    namespace="namespace-mls",
+    llm_model="gpt-3.5-turbo",  # You can change this to "gpt-3.5-turbo" for faster, cheaper responses
+    temperature=0.0,
+    k=100 
+)
+advanced_query_knowledge_fn = Function(
+        fn_name="advanced_query_knowledge",
+        fn_description="Query the RAG knowledge base for latest home sales data",
+        args=[
+            Argument(name="query", description="The query to search for", type="str"),
+        ],
+        executable=lambda query: advanced_query_knowledge_executable(searcher, query),
+    )
+
+
+
 twitter_worker = WorkerConfig(
     id="twitter_worker",
-    worker_description="This location allows for the following functionalities:\n1. Engagement and Interaction: This category includes various options for browsing and responding to tweets, such as text replies to browsed tweets.\n2. Content Creation and Posting: This functionality allows for the publication of original tweets in text or image format, enabling effective sharing of ideas and the initiation of conversations.\n3. Research and Monitoring: Tools are provided for searching and browsing tweets from influential users, facilitating real-time insights and engagement with trending discussions\n4. Write opinion on US/ San Diego CA real estate market/ crypto market",
+    worker_description="This location allows for the following functionalities:\n1. Engagement and Interaction: This category includes various options for browsing and responding to tweets, such as text replies to browsed tweets.\n2. Content Creation and Posting: This functionality allows for the publication of original tweets in text or image format, enabling effective sharing of ideas and the initiation of conversations.\n3. Research and Monitoring: Tools are provided for searching and browsing tweets from influential users, facilitating real-time insights and engagement with trending discussions\n4. Use RAG data function to find insights from latest sales MLS data and tweet those insighths\n5. Write opinion on US/ San Diego CA real estate market/ crypto market",
     get_state_fn=get_worker_state_fn,
-    action_space=[post_tweet_fn, search_tweets_fn,quote_tweet_fn, reply_tweet_fn, like_tweet_fn,]
+    action_space=[post_tweet_fn, search_tweets_fn,quote_tweet_fn, reply_tweet_fn, like_tweet_fn,advanced_query_knowledge_fn]
 )
 
 # Create agent with twitter worker
@@ -242,12 +288,14 @@ primo_agent = Agent(
     name="PrimoXAI",
     agent_goal="""Your goal is to act as a sharp, forward-thinking analyst delivering insights on the US real estate market — especially San Diego, CA — and how it intersects with the crypto economy.
     You are not here to repeat the news. You are here to spark conversation, challenge assumptions, and shape narrative. Scan Twitter using `search_tweets`, extract the signal from KOLs, and engage smartly.
+    Use sales MLS data to find insights and tweet those insights. You can find house descriptions, prices, bedrooms, bathrooms, sqft, lot size, from this dataset, and query very sepcific information so as to not exceed context length.
     Your available actions include:
     - Use `post_tweet` to share original takes, market commentary, or predictions based on current trends.
     - Use `quote_tweet` if you find an interesting tweet worth expanding or challenging — add your layer of insight.
     - Use `reply_tweet` when a user shares something that invites discussion. Keep replies sharp, respectful, and thought-provoking.
     - Use `like_tweet` to endorse tweets that align with your POV or represent smart takes.
     - Use `search_tweets` to explore fresh perspectives and gather insight before engaging.
+    - Use `advanced_query_knowledge` to find insights from latest sales MLS.You can find house descriptions, prices, bedrooms, bathrooms, sqft, lot size, from this dataset, and query very sepcific information so as to not exceed context length.
     
     Some sample query words you can use to search are:
     [Real Estate , Realtor, Property ,Real Estate Investing , Housing Market ,Home For Sale ,House Hunting, Dream Home, Homes Sweet Home, New Home, Tokenized Real Estate, Real Estate Tokenization, RWA, Blockchain Real Estate,Fractional Ownership, Mortgage Rates,Interest Rates,Mortgage,Home Loans, Refinance,Mortgage Tips,Loan Officer,Crypto Mortgage,
@@ -268,5 +316,6 @@ primo_agent = Agent(
 )
 
 # compile and run the agent
+primo_agent.reset()
 primo_agent.compile()
 primo_agent.run()
